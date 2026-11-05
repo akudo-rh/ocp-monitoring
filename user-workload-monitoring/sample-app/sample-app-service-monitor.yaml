@@ -1,0 +1,12 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: sample-app-monitor
+spec:
+  selector:
+    matchLabels:
+      app: sample-app # Serviceのラベルと一致させる
+  endpoints:
+  - port: web       # Serviceのport名と一致させる
+    interval: 30s   # 例：30秒ごとにメトリクスを取得
+    path: /metrics     # アプリ定義に合わせる

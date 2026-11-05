@@ -1,0 +1,21 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: sample-app-alerts
+  namespace: my-project
+spec:
+  groups:
+  - name: sample-app.rules
+    rules:
+    - alert: HighHttp5xxErrorRate
+      # 500番台のエラーレート / 全リクエストのレート を計算
+      expr: |
+        sum(rate(http_requests_total{status=~"5.."}[5m]))
+        /
+        sum(rate(http_requests_total[5m])) > 0.05
+      for: 1m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High HTTP 5xx error rate on {{ $labels.app }}"
+        description: "アプリケーション {{ $labels.app }} で5%以上のリクエストが500番台のエラーになっています。"
