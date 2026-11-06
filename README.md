@@ -9,6 +9,8 @@ OpenShift Container Platform (OCP) **4.21 以上**を対象に、Cluster Monitor
 
 共通する機能説明・手順は [共通編](#共通編) に、環境固有の前提条件や手順はそれぞれ [ROSA編](#rosa編) / [OCI編](#oci編) にまとめています。
 
+> 稼働している Pod（コンポーネント）の詳細な役割・構成図は [ARCHITECTURE.md](ARCHITECTURE.md) を参照してください。
+
 ## 目次
 
 - [リポジトリ構成](#リポジトリ構成)
@@ -33,6 +35,7 @@ OpenShift Container Platform (OCP) **4.21 以上**を対象に、Cluster Monitor
 ```
 ocp-monitoring/
 ├── README.md
+├── ARCHITECTURE.md                                # 稼働 Pod の役割・構成図の解説
 ├── cluster-monitoring/
 │   └── cluster-monitoring-config.yaml            # Cluster Monitoring 用 ConfigMap (UWM有効化 + 永続化)
 └── user-workload-monitoring/
