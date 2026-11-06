@@ -1,6 +1,6 @@
 # ocp-monitoring
 
-OpenShift Container Platform (OCP) **4.21 以上**を対象に、Cluster Monitoring および User Workload Monitoring (UWM) の機能概要と構築手順をまとめたリポジトリです。
+OpenShift Container Platform (OCP) 4.21 以上を対象に、Cluster Monitoring および User Workload Monitoring (UWM) の機能概要と構築手順をまとめたリポジトリです。
 
 対象プラットフォーム:
 
@@ -225,7 +225,7 @@ Web コンソールの `Observe > Targets` でスクレイピング状況、`Obs
 
 ROSA（Classic / HCP）はマネージドサービスのため、クラスタの一部コンポーネントは Red Hat SRE によって管理されています。適用前に以下を確認してください。
 
-- **User Workload Monitoring は必ずしもデフォルトで有効になっているとは限りません。** 公式ドキュメント上は新規クラスタで UWM が有効化されているとの記載がありますが、本リポジトリでの実機検証（ROSA）では `openshift-monitoring` namespace に `cluster-monitoring-config` ConfigMap 自体が存在せず、UWM が無効な状態でした。**適用前に必ず [共通編・マニフェストの適用手順](#マニフェストの適用手順) の手順3で ConfigMap の有無を確認し、存在しない場合は新規作成、存在する場合は `oc edit`（または既存設定を退避してマージ）で `enableUserWorkload: true` を設定してください。**
+- 公式ドキュメント上は新規クラスタで UWM が有効化されているとの記載がありますが、念のため `openshift-monitoring` namespace に `cluster-monitoring-config` ConfigMap 自体が存在するかどうかを確認します。**こちらの [共通編・マニフェストの適用手順](#マニフェストの適用手順) の手順3で ConfigMap の有無を確認し、存在しない場合は新規作成、存在する場合は `oc edit`（または既存設定を退避してマージ）で `enableUserWorkload: true` を設定してください。**
 - 永続化設定（`volumeClaimTemplate` による PVC）の構成方法は、ROSA（特に HCP）のバージョンによって変更が予定/実施されている場合があるため、適用前に必ず最新の公式手順を確認してください。
 - デフォルトの StorageClass はブロックストレージ（AWS EBS CSI、一般的に `gp3-csi`）です。名称は [StorageClass 名の確認方法](#storageclass-名の確認方法) の手順で必ず確認してください。
 - カスタム Prometheus インスタンスを別途デプロイしている場合、UWM 有効化前に削除が必要です。
