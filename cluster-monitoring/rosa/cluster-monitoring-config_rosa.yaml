@@ -1,0 +1,36 @@
+# User Workload Monitoring (UWM) を有効化するためのConfigMap
+# 適用: oc apply -f cluster-monitoring-config.yaml
+# 必要権限: cluster-admin
+# 適用後、openshift-user-workload-monitoring プロジェクトに
+# prometheus-user-workload / thanos-ruler-user-workload 等のPodが起動する
+#
+# alertmanagerMain.enableUserAlertmanagerConfig: true について
+#   enableUserWorkload だけではアプリチームが作成した AlertmanagerConfig は
+#   無視される(ルーティングに反映されない)。
+#   アプリチームのアラート通知(手順⑦)を機能させるには、この設定も必須。
+#
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-monitoring-config
+  namespace: openshift-monitoring
+data:
+  config.yaml: |
+    enableUserWorkload: true
+    alertmanagerMain:
+      enableUserAlertmanagerConfig: true
+      # 永続化設定を追加
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3-csi               # ストレージクラス名
+          resources:
+            requests:
+              storage: 2Gi                        # リクエストサイズ
+    prometheusK8s:
+      retention: 10d                              # 保存期間
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3-csi               # ストレージクラス名
+          resources:
+            requests:
+              storage: 5Gi                       # リクエストサイズ
