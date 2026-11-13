@@ -115,7 +115,8 @@ UWM 有効化後の役割分担はおおむね以下の通りです。
 
 #### サイジングに関する公式の目安
 
-公式ドキュメント（OpenShift 4.21）には、環境規模に依存しない「固定の推奨容量」は記載されていません。記載されているのは次のデフォルト値・例・注意点です。
+公式ドキュメント（OpenShift 4.21）には、環境規模に依存しない「固定の推奨容量」は記載されていません。
+記載されているのは次のデフォルト値・例・注意点です。
 
 | 項目 | Cluster Monitoring | User Workload Monitoring |
 |---|---|---|
@@ -134,18 +135,6 @@ UWM 有効化後の役割分担はおおむね以下の通りです。
 - 規模別の目安は、公式の「Prometheus データベースのストレージ要件」（ノード数・Pod 数に応じた増加量の試算）を参照してください。
   - Cluster Monitoring: https://docs.redhat.com/ja/documentation/monitoring_stack_for_red_hat_openshift/4.21/html-single/configuring_core_platform_monitoring
   - User Workload Monitoring: https://docs.redhat.com/ja/documentation/monitoring_stack_for_red_hat_openshift/4.21/html-single/configuring_user_workload_monitoring
-
-#### 本リポジトリのサンプル値（テスト環境向け）
-
-現状はテスト環境のため、容量・保持期間を小さめにしています。
-
-| 項目 | 値 | 備考 |
-|---|---|---|
-| PVC 容量 | 5Gi | 根拠は規模の試算ではなく、テスト用の仮置き |
-| 保持期間 (`retention`) | 10d | |
-
-本番適用時は、実測（`kubelet_volume_stats_used_bytes` など）と上記の公式「ストレージ要件」を元に、容量・保持期間を見直してください。容量は後から拡張できます。
-
 
 ### StorageClass 名の確認方法
 
