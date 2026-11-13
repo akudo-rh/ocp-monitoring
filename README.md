@@ -35,15 +35,19 @@ OpenShift Container Platform (OCP) 4.21 以上を対象に、Cluster Monitoring 
 ```
 ocp-monitoring/
 ├── README.md
-├── ARCHITECTURE.md                                # 稼働 Pod の役割・構成図の解説
+├── ARCHITECTURE.md
 ├── cluster-monitoring/
-│   └── cluster-monitoring-config.yaml            # Cluster Monitoring 用 ConfigMap (UWM有効化 + 永続化)
+│   ├── cluster-monitoring-config.yaml            # Cluster Monitoring 用 ConfigMap
+│   └── rosa/
+│       └── cluster-monitoring-config_rosa.yaml   # ROSA 向け
 └── user-workload-monitoring/
-    ├── user-workload-monitoring-config.yaml       # User Workload Monitoring 用 ConfigMap (永続化)
-    └── sample-app/                                # アプリチーム向け監視サンプル一式
-        ├── sample-app-deployment.yaml              # サンプルアプリ (Deployment + Service)
-        ├── sample-app-service-monitor.yaml         # ServiceMonitor（メトリクス収集登録）
-        └── sample-app-prometheusrule.yaml          # PrometheusRule（アラート条件定義）
+    ├── user-workload-monitoring-config.yaml      # UWM 用 ConfigMap
+    ├── rosa/
+    │   └── user-workload-monitoring-config_rosa.yaml   # ROSA 向け
+    └── sample-app/
+        ├── sample-app-deployment.yaml            # サンプルアプリ
+        ├── sample-app-service-monitor.yaml       # ServiceMonitor
+        └── sample-app-prometheusrule.yaml        # PrometheusRule
 ```
 
 ---
