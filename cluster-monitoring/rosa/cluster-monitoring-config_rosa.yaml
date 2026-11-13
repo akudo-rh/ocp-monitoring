@@ -1,5 +1,5 @@
 # User Workload Monitoring (UWM) を有効化するためのConfigMap
-# 適用: oc apply -f cluster-monitoring-config.yaml
+# 適用: oc apply -f cluster-monitoring-config_rosa.yaml
 # 必要権限: cluster-admin
 # 適用後、openshift-user-workload-monitoring プロジェクトに
 # prometheus-user-workload / thanos-ruler-user-workload 等のPodが起動する
