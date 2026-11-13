@@ -185,6 +185,54 @@ sed -i 's/<storage-class-name>/example-bv/g' user-workload-monitoring/user-workl
    oc get pvc -n openshift-user-workload-monitoring
    ```
 
+#### なぜ永続化が必要か
+
+デフォルトでは Prometheus / Alertmanager のデータは Pod 内の一時領域に置かれるため、Pod の再起動・再作成で消えます。永続ボリューム (PV) を設定すると、次の効果が得られます。
+
+- メトリクスとアラートのデータが Pod の再起動・再作成後も残る（データ損失の防止）
+- Alertmanager の再起動時に、重複通知の受信やアラートのサイレンス消失を防げる
+
+公式は「実稼働環境では永続ストレージの設定を強く推奨」しており、マルチノードクラスターでは高可用性のため次のコンポーネントで必須としています。
+
+| 種別 | 永続化が必要なコンポーネント |
+|---|---|
+| Cluster Monitoring | Prometheus, Alertmanager |
+| User Workload Monitoring | Prometheus, Alertmanager, Thanos Ruler |
+
+#### サイジングに関する公式の目安
+
+公式ドキュメント（OpenShift 4.21）には、環境規模に依存しない「固定の推奨容量」は記載されていません。記載されているのは次のデフォルト値・例・注意点です。
+
+| 項目 | Cluster Monitoring | User Workload Monitoring |
+|---|---|---|
+| Prometheus の既定の保持期間 | 15 日 | 24 時間 |
+| PVC 容量の記載例 | Prometheus: 40Gi（拡張例: 100Gi） | Thanos Ruler: 10Gi（拡張例: 20Gi） |
+| retention / retentionSize の記載例 | `retention: 24h` / `retentionSize: 10GB` | `retention: 24h` / `retentionSize: 10GB` |
+| 容量に関する注意 | 十分な永続ストレージを確保しディスクが一杯にならないようにする | Thanos Ruler の必要容量は、評価するルール数と各ルールが生成するサンプル数による。Prometheus の保持期間を設定すると Thanos Ruler も同じ保持期間を継承する（個別設定が無い場合） |
+
+※ 上記の容量例はあくまで設定方法を示す例であり、推奨値ではありません。
+
+共通の注意点（公式より）:
+
+- PVC は**拡張のみ可能で縮小はできない**。そのため、小さく始めて実測で拡張する運用が安全です。
+- PVC 設定の変更時は StatefulSet が再作成され、一時的にサービスが停止します。
+- データのコンパクションは 2 時間ごとのため、コンパクション前に PV が満杯になり `retentionSize` を超えることがあります。その間は `KubePersistentVolumeFillingUp` アラートが発生します。`retentionSize` は PVC 容量より余裕を持たせて設定してください。
+- 規模別の目安は、公式の「Prometheus データベースのストレージ要件」（ノード数・Pod 数に応じた増加量の試算）を参照してください。
+  - Cluster Monitoring: https://docs.redhat.com/ja/documentation/monitoring_stack_for_red_hat_openshift/4.21/html-single/configuring_core_platform_monitoring
+  - User Workload Monitoring: https://docs.redhat.com/ja/documentation/monitoring_stack_for_red_hat_openshift/4.21/html-single/configuring_user_workload_monitoring
+
+#### 本リポジトリのサンプル値（テスト環境向け）
+
+現状はテスト環境のため、容量・保持期間を小さめにしています。
+
+| 項目 | 値 | 備考 |
+|---|---|---|
+| PVC 容量 | 5Gi | 根拠は規模の試算ではなく、テスト用の仮置き |
+| 保持期間 (`retention`) | 10d | |
+
+本番適用時は、実測（`kubelet_volume_stats_used_bytes` など）と上記の公式「ストレージ要件」を元に、容量・保持期間を見直してください。容量は後から拡張できます。
+
+
 ### （任意）アプリチームへの権限委譲
 
 アプリチームが基盤チームに都度依頼せず `ServiceMonitor` / `PrometheusRule` / `AlertmanagerConfig` を自分たちの namespace 内で管理できるようにする場合は、該当 namespace に対して以下の RoleBinding を付与します（`monitoring-edit` / `alert-routing-edit` クラスタロールを使用）。
