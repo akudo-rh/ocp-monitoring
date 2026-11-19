@@ -5,23 +5,29 @@ metadata:
   namespace: openshift-user-workload-monitoring
 data:
   config.yaml: |
-    enableUserWorkload: true
     alertmanager:
       enabled: true
       enableAlertmanagerConfig: true
-    # 永続化設定を追加
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3-csi
+          resources:
+            requests:
+              storage: 5Gi
     prometheus:
-      retention: 10d                               # 保存期間
+      retention: 15d
+      retentionSize: 40GB                          # PVC容量(50Gi)の約8割。満杯防止
       volumeClaimTemplate:
         spec:
-          storageClassName: gp3-csi               # ストレージクラス名
+          storageClassName: gp3-csi
           resources:
             requests:
-              storage: 5Gi                        # リクエストサイズ
+              storage: 50Gi
     thanosRuler:
+      retention: 15d
       volumeClaimTemplate:
         spec:
-          storageClassName: gp3-csi               # ストレージクラス名
+          storageClassName: gp3-csi
           resources:
             requests:
-              storage: 5Gi                        # リクエストサイズ
+              storage: 10Gi
