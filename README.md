@@ -20,6 +20,7 @@ OpenShift Container Platform (OCP) 4.21 以上を対象に、Cluster Monitoring 
   - [永続化ストレージの設定](#永続化ストレージの設定)
   - [StorageClass 名の確認方法](#storageclass-名の確認方法)
   - [マニフェストの適用手順](#マニフェストの適用手順)
+  - [設定適用後の PVC 拡張手順（oc patch）](#設定適用後の-pvc-拡張手順oc-patch)
   - [（任意）アプリチームへの権限委譲](#任意アプリチームへの権限委譲)
   - [アプリ監視サンプル（ServiceMonitor / PrometheusRule）](#アプリ監視サンプルservicemonitor--prometheusrule)
 - [ROSA編](#rosa編)
@@ -127,6 +128,22 @@ UWM 有効化後の役割分担はおおむね以下の通りです。
 
 ※ 上記の容量例はあくまで設定方法を示す例であり、推奨値ではありません。
 
+#### 本リポジトリのマニフェストの設定値
+
+公式に推奨値がないため、検証用クラスタでの実測（[モニタリングデータ量の算出方法](#モニタリングデータ量の算出方法)）をもとに算出した以下を設定しています。PVC は拡張のみ可能で縮小できないため、運用中の実測で見直してください。
+
+| コンポーネント | retention | retentionSize | PVC 容量（1レプリカあたり） |
+|---|---|---|---|
+| Prometheus (k8s) | 15d（公式既定） | 40GB | 50Gi |
+| Alertmanager (main) | - | - | 5Gi |
+| Prometheus (UWM) | 15d（UWM 既定は 24h から延長） | 40GB | 50Gi |
+| Alertmanager (UWM) | - | - | 5Gi |
+| Thanos Ruler (UWM) | 15d | - | 10Gi |
+
+- Prometheus / Alertmanager は 2 レプリカ構成のため、PVC は**レプリカごとに**作成されます（Prometheus (k8s) の場合は合計 100Gi）。
+- `retention`（日数）と `retentionSize`（容量）は**先に到達した方**で古いデータが削除されます。`retentionSize` は PVC 容量の約 8 割に設定し、満杯を防ぎます。
+- 保持されるのは、Prometheus が収集したメトリクスの時系列データです（各レプリカの `/prometheus` に全データを保持）。アラートのサイレンス等は Alertmanager が保持します。
+
 共通の注意点（公式より）:
 
 - PVC は**拡張のみ可能で縮小はできない**。そのため、小さく始めて実測で拡張する運用が安全です。
@@ -135,6 +152,88 @@ UWM 有効化後の役割分担はおおむね以下の通りです。
 - 規模別の目安は、公式の「Prometheus データベースのストレージ要件」（ノード数・Pod 数に応じた増加量の試算）を参照してください。
   - Cluster Monitoring: https://docs.redhat.com/ja/documentation/monitoring_stack_for_red_hat_openshift/4.21/html-single/configuring_core_platform_monitoring
   - User Workload Monitoring: https://docs.redhat.com/ja/documentation/monitoring_stack_for_red_hat_openshift/4.21/html-single/configuring_user_workload_monitoring
+
+#### モニタリングデータ量の算出方法
+
+PVC のサイズは、「Prometheus が 1 秒あたり何サンプルを取り込んでいるか」から 1 日あたりのデータ増加量を求め、保持期間を掛けて見積もります。以下のコマンドは、Cluster Monitoring 用（`openshift-monitoring` / `prometheus-k8s-0`）です。UWM の場合は、`-n openshift-user-workload-monitoring` と `prometheus-user-workload-0` に読み替えてください。
+
+##### 1. 現在のサンプル取り込み速度（samples/秒）を取得する
+
+```bash
+oc -n openshift-monitoring exec -c prometheus prometheus-k8s-0 -- \
+  curl -s -G "http://localhost:9090/api/v1/query" \
+  --data-urlencode 'query=sum by (pod) (rate(prometheus_tsdb_head_samples_appended_total[5m]))'
+```
+
+出力例（検証用クラスタ。`type` ラベルごとに分かれた結果を `sum by (pod)` で合算したもの）:
+
+```
+{"status":"success","data":{"resultType":"vector","result":[
+  {"metric":{"pod":"prometheus-k8s-0"},"value":[1795012962.755,"11355.67"]},
+  {"metric":{"pod":"prometheus-k8s-1"},"value":[1795012962.755,"11356.96"]}]}}
+```
+
+出力の見方:
+
+- `value` の 2 番目の値（文字列）が **1 秒あたりの取り込みサンプル数**です（上記は約 11,356 samples/秒）。1 番目はタイムスタンプです。
+- `-0` と `-1` の 2 レプリカは同じターゲットを収集するため、ほぼ同じ値になります。**合算せず、1 レプリカ分として扱います**（PVC はレプリカごとにあるため）。2 つの値が大きく乖離する場合は、片方のスクレイプが失敗していないかを確認してください。
+- `sum by (pod)` を付けない場合は、`type="float"`（通常のサンプル）と `type="histogram"`（ネイティブヒストグラム。通常は 0）に分かれて出力されます。`type="float"` の値が実質的な取り込み速度です。
+- この値はその時点の瞬間値です。変動を均すには、過去 1 日の平均を取ります。
+
+  ```bash
+  oc -n openshift-monitoring exec -c prometheus prometheus-k8s-0 -- \
+    curl -s -G "http://localhost:9090/api/v1/query" \
+    --data-urlencode 'query=avg_over_time(sum by (pod) (rate(prometheus_tsdb_head_samples_appended_total[5m]))[1d:5m])'
+  ```
+
+##### 2. 1 サンプルあたりのディスク使用量（バイト）を実測する（任意）
+
+目安は 1〜2 バイト/サンプルですが、実測もできます。コンパクション（2 時間ごと）後のブロックで計算されるため、稼働から数時間以上経過している必要があります。
+
+```bash
+oc -n openshift-monitoring exec -c prometheus prometheus-k8s-0 -- \
+  curl -s -G "http://localhost:9090/api/v1/query" \
+  --data-urlencode 'query=rate(prometheus_tsdb_compaction_chunk_size_bytes_sum[1d]) / rate(prometheus_tsdb_compaction_chunk_samples_sum[1d])'
+```
+
+`value` の 2 番目の値が**バイト/サンプル**です。この値が 1〜2 の範囲なら、下の算出式の「1〜2 バイト」を実測値に置き換えて使います。
+
+##### 3. 実際のディスク使用量を確認する
+
+```bash
+# PV の使用量・空き容量（バイト）
+oc -n openshift-monitoring exec -c prometheus prometheus-k8s-0 -- \
+  curl -s -G "http://localhost:9090/api/v1/query" \
+  --data-urlencode 'query=kubelet_volume_stats_used_bytes{namespace="openshift-monitoring",persistentvolumeclaim=~"prometheus-k8s-db-.*"}'
+
+# Pod 内から直接確認する場合
+oc -n openshift-monitoring exec -c prometheus prometheus-k8s-0 -- df -h /prometheus
+```
+
+- 使用量が PVC 容量に近い場合は枯渇の兆候です（PVC 枯渇時は、Observe 画面で「データポイントがありません」となることがあります）。
+- 保持期間（`retention`）または `retentionSize` に達すると古いブロックが削除されるため、**定常状態では使用量の増加は止まります**。稼働開始から日数が浅い場合を除き、実測の増加量よりも、下記の算出式での見積もりを使います。
+
+##### 算出式
+
+| 項目 | 算出式 |
+|---|---|
+| 1 日のサンプル数 | 取り込み速度（samples/秒）× 86,400 |
+| 1 日のデータ増加量 | 1 日のサンプル数 × バイト/サンプル（1〜2 バイト、または実測値） |
+| 保持期間分のデータ量 | 1 日のデータ増加量 × `retention` の日数 |
+| 必要な PVC 容量 | 保持期間分のデータ量 × 1.3（WAL・head・コンパクション中の一時領域の余裕） |
+| `retentionSize` | PVC 容量 × 0.8 程度 |
+| `retentionSize` で保持できる日数 | `retentionSize` ÷ 1 日のデータ増加量 |
+
+##### 算出例（上記の出力: 11,356 samples/秒、`retention: 15d`）
+
+| 項目 | 1.5 バイト/サンプル | 2 バイト/サンプル |
+|---|---|---|
+| 1 日のサンプル数 | 約 9.8 億（11,356 × 86,400） | 約 9.8 億 |
+| 1 日のデータ増加量 | 約 1.5 GB | 約 2.0 GB |
+| 15 日分 | 約 22 GB | 約 29 GB |
+| × 1.3（必要な PVC 容量） | 約 29 GB | 約 38 GB |
+
+いずれも PVC 50Gi（`retentionSize: 40GB`）に収まるため、本リポジトリのマニフェストは Prometheus (k8s) を 50Gi / 40GB としています。2 バイト/サンプルの場合は余裕が小さいので、クラスタの成長（ノード・Pod の増加）に合わせて定期的に再計算してください。
 
 ### StorageClass 名の確認方法
 
@@ -221,6 +320,53 @@ sed -i 's/<storage-class-name>/example-bv/g' user-workload-monitoring/user-workl
    oc get pvc -n openshift-monitoring
    oc get pvc -n openshift-user-workload-monitoring
    ```
+
+### 設定適用後の PVC 拡張手順（oc patch）
+
+既に稼働しているクラスタで、ConfigMap の `volumeClaimTemplate` のサイズを変更した場合は、既存の PVC も `oc patch` で拡張します。ConfigMap を適用するだけでは、既存の PVC のサイズが変わらないことがあるためです。
+
+> **事前確認**
+> - PVC は**拡張のみ可能で、縮小はできません**。現在の容量より小さい値を指定すると失敗します。`oc get pvc` で現在の容量を確認してから実行してください。
+> - StorageClass が `allowVolumeExpansion: true` であることが必要です（ROSA の `gp3-csi` は対応しています）。
+> - 以下は ROSA（`gp3-csi`）の例です。
+
+```bash
+# 1. ConfigMap の適用（ファイル保存後）
+oc apply -f cluster-monitoring-config.yaml
+oc apply -f user-workload-monitoring-config.yaml
+```
+
+```bash
+# 2. 既存の Prometheus PVC を 50Gi に拡張
+oc -n openshift-monitoring patch pvc prometheus-k8s-db-prometheus-k8s-0 -p '{"spec":{"resources":{"requests":{"storage":"50Gi"}}}}'
+oc -n openshift-monitoring patch pvc prometheus-k8s-db-prometheus-k8s-1 -p '{"spec":{"resources":{"requests":{"storage":"50Gi"}}}}'
+```
+
+```bash
+# 3. 既存の Alertmanager PVC を 5Gi に拡張（存在する場合）
+oc -n openshift-monitoring patch pvc alertmanager-main-db-alertmanager-main-0 -p '{"spec":{"resources":{"requests":{"storage":"5Gi"}}}}'
+oc -n openshift-monitoring patch pvc alertmanager-main-db-alertmanager-main-1 -p '{"spec":{"resources":{"requests":{"storage":"5Gi"}}}}'
+```
+
+UWM 側の PVC も拡張する場合は、PVC 名を確認してから、同様に `oc patch` を実行してください（`openshift-user-workload-monitoring` namespace）。
+
+```bash
+oc -n openshift-user-workload-monitoring get pvc
+```
+
+拡張後の確認:
+
+```bash
+# CAPACITY が新しい値になっていること、STATUS が Bound であること
+oc -n openshift-monitoring get pvc
+
+# 拡張処理中は Conditions に FileSystemResizePending が表示されることがある
+oc -n openshift-monitoring describe pvc prometheus-k8s-db-prometheus-k8s-0
+
+# Pod が Running、ClusterOperator が Degraded でないこと
+oc -n openshift-monitoring get pods
+oc get co monitoring
+```
 
 ### （任意）アプリチームへの権限委譲
 
@@ -353,6 +499,7 @@ OCI 上のセルフマネージドクラスタは、通常の OCP 向けドキ�
 | `oc get co monitoring` が `PROGRESSING=True` のまま変化しない | `oc get pod -n openshift-monitoring` / `oc get pod -n openshift-user-workload-monitoring` | Pod が `Pending` のままになっていないか確認 |
 | 上記 Pod が `Pending` | `oc describe pod <pod-name> -n <namespace>` | `Events` に `node(s) had volume node affinity conflict` が出ていないか確認（→ [OCI編のゾーンラベル事前確認](#️-事前確認-ワーカーノードのゾーンラベル) 参照） |
 | PVC が `Pending` のまま | `oc describe pvc <pvc-name> -n <namespace>` | `storageClassName` の指定ミス（[StorageClass 名の確認方法](#storageclass-名の確認方法) 参照） |
+| Observe の Dashboards / Metrics で「データポイントがありません」と表示される | `oc -n openshift-monitoring get pvc` / `oc -n openshift-monitoring exec -c prometheus prometheus-k8s-0 -- df -h /prometheus` | PVC の枯渇（Prometheus の PV が満杯）。PVC を拡張する（→ [PVC の拡張手順](#設定適用後の-pvc-拡張手順oc-patch) 参照） |
 | アプリチームの `AlertmanagerConfig` によるルーティングが反映されない | `oc get cm cluster-monitoring-config -n openshift-monitoring -o yaml` | `alertmanagerMain.enableUserAlertmanagerConfig: true` が設定されているか確認 |
 
 ---
